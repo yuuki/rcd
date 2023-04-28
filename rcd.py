@@ -3,6 +3,7 @@
 import argparse
 import time
 
+import joblib
 import numpy as np
 import utils as u
 
@@ -23,6 +24,7 @@ DEFAULT_GAMMA = 5
 # SRC_DIR = 'sock-shop-data/carts-mem/1/'
 SRC_DIR = "data/s-2/n-10-d-3-an-1-nor-s-1000-an-s-1000/"
 
+
 # Split the dataset into multiple subsets
 def create_chunks(df, gamma):
     chunks = list()
@@ -35,7 +37,7 @@ def create_chunks(df, gamma):
     return chunks
 
 
-def run_level(normal_df, anomalous_df, gamma, localized, bins, verbose):
+def run_level(normal_df, anomalous_df, gamma, localized, bins, n_workers, verbose):
     ci_tests = 0
     chunks = create_chunks(normal_df, gamma)
     if verbose:
@@ -44,17 +46,36 @@ def run_level(normal_df, anomalous_df, gamma, localized, bins, verbose):
     f_child_union = list()
     mi_union = list()
     f_child = list()
-    for c in chunks:
-        # Try this segment with multiple values of alpha until we find at least one node
-        rc, _, mi, ci = u.top_k_rc(
-            normal_df.loc[:, c],
-            anomalous_df.loc[:, c],
-            bins=bins,
-            localized=localized,
-            start_alpha=LOCAL_ALPHA,
-            min_nodes=1,
-            verbose=verbose,
+    if n_workers == 1:
+        results = [
+            u.top_k_rc(
+                normal_df.loc[:, c],
+                anomalous_df.loc[:, c],
+                bins=bins,
+                localized=localized,
+                start_alpha=LOCAL_ALPHA,
+                min_nodes=1,
+                verbose=verbose,
+            )
+            for c in chunks
+        ]
+    else:
+        results = joblib.Parallel(n_jobs=n_workers)(
+            joblib.delayed(u.top_k_rc)(
+                normal_df.loc[:, c],
+                anomalous_df.loc[:, c],
+                bins=bins,
+                localized=localized,
+                start_alpha=LOCAL_ALPHA,
+                min_nodes=1,
+                verbose=verbose,
+            )
+            for c in chunks
         )
+        assert results is not None, "The results of phi-PCs are not empty"
+
+    for rc, _, mi, ci in results:
+        # Try this segment with multiple values of alpha until we find at least one node
         f_child_union += rc
         mi_union += mi
         ci_tests += ci
@@ -68,7 +89,7 @@ def run_level(normal_df, anomalous_df, gamma, localized, bins, verbose):
     return f_child_union, mi_union, ci_tests
 
 
-def run_multi_phase(normal_df, anomalous_df, gamma, localized, bins, verbose):
+def run_multi_phase(normal_df, anomalous_df, gamma, localized, bins, n_workers, verbose):
     f_child_union = normal_df.columns
     mi_union = []
     i = 0
@@ -83,12 +104,11 @@ def run_multi_phase(normal_df, anomalous_df, gamma, localized, bins, verbose):
             gamma,
             localized,
             bins,
+            n_workers,
             verbose,
         )
         if verbose:
-            print(
-                f"Level-{i}: variables {len(f_child_union)} | time {time.time() - start}"
-            )
+            print(f"Level-{i}: variables {len(f_child_union)} | time {time.time() - start}")
         i += 1
         mi_union += mi
         # Phase-1 with only one level
@@ -116,13 +136,9 @@ def run_multi_phase(normal_df, anomalous_df, gamma, localized, bins, verbose):
     return rc, G, ci_tests
 
 
-def rca_with_rcd(
-    normal_df, anomalous_df, bins, gamma=DEFAULT_GAMMA, localized=False, verbose=VERBOSE
-):
+def rca_with_rcd(normal_df, anomalous_df, bins, gamma=DEFAULT_GAMMA, localized=False, n_workers=1, verbose=VERBOSE):
     start = time.time()
-    rc, G, ci_tests = run_multi_phase(
-        normal_df, anomalous_df, gamma, localized, bins, verbose
-    )
+    rc, G, ci_tests = run_multi_phase(normal_df, anomalous_df, gamma, localized, bins, n_workers, verbose)
     end = time.time()
 
     return {"time": end - start, "root_cause": rc, "graph": G, "ci_tests": ci_tests}
@@ -135,18 +151,17 @@ def top_k_rc(
     bins,
     gamma=DEFAULT_GAMMA,
     localized=False,
+    n_workers=1,
     verbose=VERBOSE,
 ):
-    result = rca_with_rcd(normal_df, anomalous_df, bins, gamma, localized, verbose)
+    result = rca_with_rcd(normal_df, anomalous_df, bins, gamma, localized, n_workers, verbose)
     return {**result, "root_cause": result["root_cause"][:k]}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run PC on the given dataset")
 
-    parser.add_argument(
-        "--path", type=str, default=SRC_DIR, help="Path to the experiment data"
-    )
+    parser.add_argument("--path", type=str, default=SRC_DIR, help="Path to the experiment data")
     parser.add_argument("--k", type=int, default=K, help="Top-k root causes")
     parser.add_argument(
         "--local",
@@ -158,14 +173,10 @@ if __name__ == "__main__":
     path = args.path
     k = args.k
     local = args.local
-    (normal_df, anomalous_df) = u.load_datasets(
-        path + "normal.csv", path + "anomalous.csv"
-    )
+    (normal_df, anomalous_df) = u.load_datasets(path + "normal.csv", path + "anomalous.csv")
 
     # Enable the following line for sock-shop or real outage dataset
     normal_df, anomalous_df = u.preprocess(normal_df, anomalous_df, 90)
 
     result = top_k_rc(normal_df, anomalous_df, k=k, bins=BINS, localized=local)
-    print(
-        f"Top {k} took {round(result['time'], 4)} and potential root causes are {result['root_cause']}"
-    )
+    print(f"Top {k} took {round(result['time'], 4)} and potential root causes are {result['root_cause']}")
