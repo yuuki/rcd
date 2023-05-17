@@ -111,9 +111,7 @@ def save_graph(graph, file):
     plt.savefig(file)
 
 
-def pc_with_fnode(
-    normal_df, anomalous_df, alpha, bins=None, localized=False, verbose=VERBOSE
-):
+def pc_with_fnode(normal_df, anomalous_df, alpha, bins=None, localized=False, verbose=VERBOSE):
     data = _preprocess_for_fnode(normal_df, anomalous_df, bins)
     cg = run_pc(data, alpha, localized=localized, verbose=verbose)
     return cg.nx_graph
@@ -250,8 +248,8 @@ def _discretize(data, bins):
     discretizer = KBinsDiscretizer(n_bins=bins, encode="ordinal", strategy="kmeans")
     discretizer.fit(d)
     disc_d = discretizer.transform(d)
-    disc_d = pd.DataFrame(disc_d, columns=d.columns.values.tolist())
-    disc_d[F_NODE] = data[F_NODE].tolist()
+    disc_d = pd.dataframe(disc_d, columns=d.columns.values.tolist())
+    disc_d[f_node] = data[f_node].tolist()
 
     for c in disc_d:
         disc_d[c] = disc_d[c].astype(int)
