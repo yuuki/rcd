@@ -248,8 +248,8 @@ def _discretize(data, bins):
     discretizer = KBinsDiscretizer(n_bins=bins, encode="ordinal", strategy="kmeans")
     discretizer.fit(d)
     disc_d = discretizer.transform(d)
-    disc_d = pd.dataframe(disc_d, columns=d.columns.values.tolist())
-    disc_d[f_node] = data[f_node].tolist()
+    disc_d = pd.DataFrame(disc_d, columns=d.columns.values.tolist())
+    disc_d[F_NODE] = data[F_NODE].tolist()
 
     for c in disc_d:
         disc_d[c] = disc_d[c].astype(int)
